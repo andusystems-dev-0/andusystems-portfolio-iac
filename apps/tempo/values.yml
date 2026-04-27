@@ -1,0 +1,61 @@
+fullnameOverride: portfolio-tempo
+
+tempo:
+  # OTLP receiver — Alloy and instrumented apps send traces here
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: "0.0.0.0:4317"
+        http:
+          endpoint: "0.0.0.0:4318"
+
+  # MinIO as trace storage backend
+  storage:
+    trace:
+      backend: s3
+      s3:
+        bucket: tempo-data
+        endpoint: 10.238.40.23:9000
+        insecure: true
+
+  # Generate span metrics for Prometheus
+  metricsGenerator:
+    enabled: true
+    remoteWriteUrl: http://portfolio-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090/api/v1/write
+
+  global_overrides:
+    per_tenant_override_config: ""
+    max_traces_per_user: 50000
+
+  extraEnv:
+    - name: AWS_ACCESS_KEY_ID
+      valueFrom:
+        secretKeyRef:
+          name: tempo-minio-credentials
+          key: rootUser
+    - name: AWS_SECRET_ACCESS_KEY
+      valueFrom:
+        secretKeyRef:
+          name: tempo-minio-credentials
+          key: rootPassword
+
+persistence:
+  enabled: true
+  storageClassName: longhorn
+  size: 10Gi
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 1Gi
+
+serviceMonitor:
+  enabled: true
+
+service:
+  type: LoadBalancer
+  loadBalancerIP: "10.238.80.20"

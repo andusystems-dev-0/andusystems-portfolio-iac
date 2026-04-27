@@ -1,0 +1,10 @@
+# portfolio/apps/pangolin-newt/values.yml
+newtInstances:
+  - name: main
+    enabled: true
+    auth:
+      existingSecretName: newt-credentials
+      keys:
+        endpointKey: newt-endpoint
+        idKey: newt-id
+        secretKey: newt-secret

@@ -1,0 +1,6 @@
+# ArgoCD manages infra apps (longhorn, traefik, cert-manager, newt, prometheus, loki, tempo, alloy)
+# via the andusystems-portfolio spoke in the management cluster.
+# This playbook only applies resources that ArgoCD can't manage (secrets with credentials, CRDs).
+- import_playbook: ./roles/cert-manager.yml
+- import_playbook: ./roles/pangolin-newt.yml
+- import_playbook: ./roles/portfolio.yml

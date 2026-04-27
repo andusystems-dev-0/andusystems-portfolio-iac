@@ -1,0 +1,12 @@
+- name: Install Longhorn
+  gather_facts: true
+  hosts: localhost
+  tasks:
+
+    - include_role:
+        name: longhorn
+      tags:
+        - longhorn
+        - portfolio-apps
+        - apps
+        - install

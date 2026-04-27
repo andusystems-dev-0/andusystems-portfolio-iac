@@ -1,0 +1,227 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: portfolio
+  labels:
+    # Used by NetworkPolicy selectors
+    name: portfolio
+---
+# Dedicated ServiceAccount with no mounted token — the static site doesn't
+# talk to the Kubernetes API, so this removes a credential exfiltration path.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: portfolio
+  namespace: portfolio
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: portfolio
+  namespace: portfolio
+  labels:
+    app: portfolio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: portfolio
+  template:
+    metadata:
+      labels:
+        app: portfolio
+    spec:
+      serviceAccountName: portfolio
+      automountServiceAccountToken: false
+      # Pod-level security context — runs as the `nginx` user (uid 101) baked
+      # into the nginxinc/nginx-unprivileged image. The Dockerfile in the
+      # Portfolio app repo MUST use that base image; the standard nginx:alpine
+      # image runs as root and will not start under these constraints.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      # Pull credentials for the private Nexus registry on the storage cluster
+      # (registry.andusystems.com). Secret created by the portfolio Ansible
+      # role from a Jinja2-templated dockerconfigjson — see
+      # apps/portfolio/registry-secret.yml.
+      imagePullSecrets:
+        - name: nexus-registry-credentials
+      containers:
+        - name: portfolio
+          image: registry.andusystems.com/andusystems-docker/portfolio:04c5de5
+          imagePullPolicy: Always
+          # Container-level hardening: drop everything we don't need
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          volumeMounts:
+            # nginx-unprivileged writes its pid to /tmp/nginx.pid and uses
+            # /tmp for client_body/proxy/fastcgi/uwsgi/scgi temp dirs. With
+            # readOnlyRootFilesystem: true we have to provide a writable
+            # emptyDir at /tmp.
+            - name: tmp
+              mountPath: /tmp
+            # /var/cache/nginx is also written by nginx for various caches.
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: nginx-cache
+          emptyDir:
+            sizeLimit: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: portfolio
+  namespace: portfolio
+  labels:
+    app: portfolio
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+  selector:
+    app: portfolio
+---
+# Traefik IngressRoute. Listens on both `web` and `websecure` to support
+# Pangolin private resources whether they forward HTTP or HTTPS internally
+# (Pangolin sometimes does end-to-end TLS even though TLS is also terminated
+# at its public edge). The cert-manager Certificate below provides a real
+# Let's Encrypt cert for the internal websecure leg via DNS-01 (Cloudflare),
+# matching the rest of the cluster's apps.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: portfolio
+  namespace: portfolio
+spec:
+  entryPoints:
+    - web
+    - websecure
+  routes:
+    - match: Host(`portfolio.andusystems.com`)
+      kind: Rule
+      services:
+        - name: portfolio
+          port: 80
+  tls:
+    secretName: portfolio-tls
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: portfolio-tls
+  namespace: portfolio
+spec:
+  secretName: portfolio-tls
+  issuerRef:
+    name: letsencrypt
+    kind: ClusterIssuer
+  dnsNames:
+    - portfolio.andusystems.com
+---
+# ============================================================================
+# NetworkPolicies: lateral-movement prevention for the portfolio namespace.
+# NOTE: these only ENFORCE with a CNI that supports NetworkPolicy (Calico,
+# Cilium, kube-router). Flannel alone ignores them — see docs/SECURITY.md.
+# ============================================================================
+# Default-deny: no traffic in or out unless explicitly allowed below.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: portfolio
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# Allow ingress only from Traefik (which is the sole public entry path via
+# IngressRoute). Nothing else in the cluster can talk to the portfolio pod.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-traefik-ingress
+  namespace: portfolio
+spec:
+  podSelector:
+    matchLabels:
+      app: portfolio
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+      ports:
+        - port: 8080
+          protocol: TCP
+---
+# Allow egress only to kube-dns for name resolution. The static site doesn't
+# need to reach anything else — no outbound API calls, no telemetry. If the
+# pod is ever compromised, it can't reach cluster services, node metadata,
+# or other namespaces.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: portfolio
+spec:
+  podSelector:
+    matchLabels:
+      app: portfolio
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP

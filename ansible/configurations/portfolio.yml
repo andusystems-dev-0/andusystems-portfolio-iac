@@ -1,0 +1,7 @@
+- import_playbook: ./roles/vms.yml
+- import_playbook: ./roles/kubernetes.yml
+- import_playbook: ./roles/metallb.yml
+- import_playbook: ./roles/longhorn.yml
+- import_playbook: ./roles/cert-manager.yml
+- import_playbook: ./roles/pangolin-newt.yml
+- import_playbook: ./roles/portfolio.yml

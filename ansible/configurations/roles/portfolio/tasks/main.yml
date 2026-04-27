@@ -1,0 +1,7 @@
+---
+- name: main | install portfolio
+  import_tasks: install.yml
+  tags:
+    - portfolio
+    - apps
+    - install

@@ -1,0 +1,67 @@
+---
+# Create VMs on Proxmox
+# --- Terraform: Create VMs ---
+- name: Terraform destroy (layer-1-infrastructure)
+  community.general.terraform:
+    project_path: "{{ repo_root }}/terraform/layers/layer-1-infrastructure"
+    variables_files:
+      - "{{ repo_root }}/terraform/terraform.tfvars"
+    state: absent
+    force_init: true
+  register: tf_destroy
+  retries: 5
+  delay: 15
+  until: tf_destroy is not failed
+  ignore_errors: true
+  become: false
+  
+- name: Terraform apply (layer-1-infrastructure)
+  community.general.terraform:
+    project_path: "{{ repo_root }}/terraform/layers/layer-1-infrastructure"
+    variables_files:
+      - "{{ repo_root }}/terraform/terraform.tfvars"
+    state: present
+    force_init: true
+  register: tf_apply
+  retries: 5
+  delay: 15
+  until: tf_apply is not failed
+  become: false
+
+- name: install | Add hosts entry for vms
+  ansible.builtin.lineinfile:
+    path: '/etc/hosts'
+    line: '{{ item[0] }} {{ item[1] }}'
+    state: present
+  loop: "{{ vm_ips | zip(['portfolioctrl', 'portfoliowrkr0', 'portfoliowrkr1', 'portfoliowrkr2', 'portfoliowrkr3', 'portfoliowrkr4']) | list }}"
+
+- name: install | Remove any existing known_hosts entries for VMs
+  ansible.builtin.known_hosts:
+    name: "{{ item }}"
+    state: absent
+  loop: "{{ vm_ips }}"
+  become: false
+
+- name: install | Get SSH host key for VMs
+  ansible.builtin.command: "ssh-keyscan -H {{ item }}"
+  loop: "{{ vm_ips }}"
+  register: "ssh_keyscan"
+  #until: ssh_keyscan.rc == 0
+  retries: 4
+  delay: 15
+  #changed_when: false
+  become: false
+  ignore_errors: true
+
+- name: install | Add SSH host key to known_hosts
+  ansible.builtin.known_hosts:
+    name: "{{ item.item }}"
+    key: "{{ item.stdout }}"
+    state: present
+  loop: "{{ ssh_keyscan.results }}"
+  become: false
+
+- name: install | ssh-copy-id to vms
+  ansible.builtin.shell: "ssh-copy-id -i {{ ssh_key_path }} {{ ssh_user }}@{{ item }}"
+  loop: "{{ vm_ips }}"
+  become: false

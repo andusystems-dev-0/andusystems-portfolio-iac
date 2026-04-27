@@ -1,0 +1,89 @@
+# manifests/traefik/values.yml
+#deployment:
+#  replicas: 2
+
+#TODO: Maybe add this to the values.yaml file:
+#installCRDs: true
+image:
+  tag: "3.6.7"
+
+providers:
+  kubernetesIngress:
+    publishedService:
+      enabled: true
+  kubernetesCRD:
+    enabled: true
+    allowCrossNamespace: true
+    allowExternalNameServices: true
+
+#ingressRoute:
+#  dashboard:
+#    enabled: true
+#    matchRule: Host(`traefik.your-domain.com`) && PathPrefix(`/dashboard`)
+#    entryPoints:
+#      - web
+    #tls:
+    #  certResolver: letsencrypt  # or "vault" for internal
+
+ports:
+  web:
+    port: 8000          # internal container port
+    exposedPort: 80     # external port MetalLB exposes
+    protocol: TCP
+    # redirections commented out until TLS is ready
+  websecure:
+    port: 8443
+    exposedPort: 443
+    protocol: TCP
+  #  redirections:
+  #    entryPoint:
+  #      to: websecure
+  #      scheme: https
+  #      permanent: true
+
+# Enables the dashboard in Secure Mode
+#api:
+#  dashboard: true
+#  insecure: false
+
+# Fix RBAC — allow Traefik to read cluster-wide resources
+podSecurityContext:
+  {}
+
+# Add explicit cluster-level RBAC rules
+rbac:
+  enabled: true
+  namespaced: false    # must be false for cross-namespace routing
+
+# Add extra cluster role rules to fix the configmaps forbidden error
+additionalVolumes: []
+deployment:
+  additionalContainers: []
+
+# This patches the ClusterRole Helm generates
+extraObjects:
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata:
+      name: traefik-configmap-access
+    rules:
+      - apiGroups: [""]
+        resources: ["configmaps"]
+        verbs: ["get", "list", "watch"]
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata:
+      name: traefik-configmap-access
+    roleRef:
+      apiGroup: rbac.authorization.k8s.io
+      kind: ClusterRole
+      name: traefik-configmap-access
+    subjects:
+      - kind: ServiceAccount
+        name: portfolio-traefik
+        namespace: traefik
+
+additionalArguments:
+  # Enable access logs for debugging
+  - "--accesslog=true"
+  - "--log.level=DEBUG"

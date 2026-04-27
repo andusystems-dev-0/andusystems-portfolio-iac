@@ -1,0 +1,5 @@
+- name: main | install loki
+  import_tasks: install.yml
+  tags:
+    - loki
+    - install

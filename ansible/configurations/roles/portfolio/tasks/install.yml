@@ -1,0 +1,41 @@
+---
+# Bootstrap-only role for the portfolio app.
+#
+# Image build/push happens in the Portfolio app repo's GitHub Actions workflow
+# (.github/workflows/build-and-push.yml) which pushes to Nexus on the storage
+# cluster (registry.andusystems.com) as the `ci-pusher` user, then bumps the
+# image tag in apps/portfolio/manifest.yml on this repo. Management ArgoCD
+# (Application: portfolio-app, defined in andusystems-management/apps/
+# andusystems-portfolio/manifest.yml) syncs the workload from there.
+#
+# This role only handles the prerequisites that ArgoCD CANNOT own because
+# they depend on vault secrets that ArgoCD never sees:
+#
+#   1. The portfolio namespace (so the secret has somewhere to land)
+#   2. The nexus-registry-credentials imagePullSecret, templated from
+#      vault by apps/portfolio/registry-secret.yml
+#
+# Without (2) the pod gets stuck on ImagePullBackOff. ArgoCD reconciles
+# everything else (Deployment, Service, IngressRoute, Certificate,
+# NetworkPolicies) from apps/portfolio/manifest.yml.
+
+- name: Create portfolio namespace
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: portfolio
+        labels:
+          name: portfolio
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+
+- name: Apply Nexus registry pull secret
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', repo_root + '/apps/portfolio/registry-secret.yml') | from_yaml_all | list }}"
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+  no_log: true   # contains password from vault

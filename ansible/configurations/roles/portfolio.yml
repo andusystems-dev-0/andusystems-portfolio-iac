@@ -1,0 +1,11 @@
+- name: Install portfolio
+  gather_facts: true
+  hosts: localhost
+  tasks:
+
+    - include_role:
+        name: portfolio
+      tags:
+        - portfolio
+        - apps
+        - install
