@@ -54,7 +54,7 @@ spec:
         - name: nexus-registry-credentials
       containers:
         - name: portfolio
-          image: registry.andusystems.com/andusystems-docker/portfolio:04c5de5
+          image: registry.andusystems.com/andusystems-docker/portfolio:1ee2d40
           imagePullPolicy: Always
           # Container-level hardening: drop everything we don't need
           securityContext:
@@ -137,7 +137,7 @@ spec:
     - web
     - websecure
   routes:
-    - match: Host(`portfolio.andusystems.com`)
+    - match: Host(`portfolio.andusystems.com`) || Host(`alexddev.com`)
       kind: Rule
       services:
         - name: portfolio
@@ -157,6 +157,7 @@ spec:
     kind: ClusterIssuer
   dnsNames:
     - portfolio.andusystems.com
+    - alexddev.com
 ---
 # ============================================================================
 # NetworkPolicies: lateral-movement prevention for the portfolio namespace.

@@ -111,7 +111,7 @@ spec:
     - web
     - websecure
   routes:
-    - match: Host(`portfolio.andusystems.com`) && PathPrefix(`/api/status`)
+    - match: (Host(`portfolio.andusystems.com`) || Host(`alexddev.com`)) && PathPrefix(`/api/status`)
       kind: Rule
       services:
         - name: cluster-status
@@ -131,3 +131,4 @@ spec:
     kind: ClusterIssuer
   dnsNames:
     - portfolio.andusystems.com
+    - alexddev.com
