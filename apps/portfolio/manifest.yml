@@ -54,7 +54,7 @@ spec:
         - name: nexus-registry-credentials
       containers:
         - name: portfolio
-          image: registry.andusystems.com/andusystems-docker/portfolio:1ee2d40
+          image: registry.andusystems.com/andusystems-docker/portfolio:6ca11c7
           imagePullPolicy: Always
           # Container-level hardening: drop everything we don't need
           securityContext:
