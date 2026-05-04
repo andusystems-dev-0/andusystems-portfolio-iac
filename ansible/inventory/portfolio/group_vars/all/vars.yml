@@ -64,6 +64,8 @@ portfolio_image: "registry.andusystems.com/andusystems-docker/portfolio"
 portfolio_tag: "latest"
 portfolio_host: "portfolio.andusystems.com"
 
+nexus_registry_ip: "{{ vault_nexus_registry_ip }}"
+
 # Forgejo registry credentials (no longer used for image pulls — kept for
 # any non-image Forgejo API access from Ansible)
 forgejo_admin_user: "{{ vault_forgejo_admin_user }}"

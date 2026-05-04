@@ -146,16 +146,17 @@
 # kubelet/containerd image pull happens on the *node* (not in the pod), so
 # Pod-level `hostAliases` is too late: the pull is what fails first. Pinning
 # in /etc/hosts on every node lets containerd resolve the name, connect to
-# 10.238.40.21:443 with SNI=registry.andusystems.com, and validate against
-# the real Let's Encrypt cert that storage Traefik serves for that host
-# (apps/nexus/manifests/cert.yml in andusystems-storage).
+# {{ nexus_registry_ip }}:443 with SNI=registry.andusystems.com, and validate
+# against the real Let's Encrypt cert that storage Traefik serves for that
+# host (apps/nexus/manifests/cert.yml in andusystems-storage).
 #
 # Tagged separately so it can be re-run on a live cluster without triggering
 # the destructive kubeadm reset/init tasks below.
 - name: install | Pin registry.andusystems.com in cloud-init hosts template
   ansible.builtin.lineinfile:
     path: /etc/cloud/templates/hosts.debian.tmpl
-    line: "10.238.40.21 registry.andusystems.com"
+    line: "{{ nexus_registry_ip }} registry.andusystems.com"
+    regexp: '\sregistry\.andusystems\.com$'
     state: present
   tags:
     - kubernetes
@@ -165,7 +166,8 @@
 - name: install | Pin registry.andusystems.com in /etc/hosts
   ansible.builtin.lineinfile:
     path: /etc/hosts
-    line: "10.238.40.21 registry.andusystems.com"
+    line: "{{ nexus_registry_ip }} registry.andusystems.com"
+    regexp: '\sregistry\.andusystems\.com$'
     state: present
   tags:
     - kubernetes
