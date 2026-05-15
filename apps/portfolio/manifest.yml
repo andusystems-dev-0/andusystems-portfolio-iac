@@ -100,7 +100,7 @@ spec:
               mountPath: /data
       containers:
         - name: portfolio
-          image: registry.andusystems.com/andusystems-docker/portfolio:1ee2d40
+          image: registry.andusystems.com/andusystems-docker/portfolio:6ef0172
           imagePullPolicy: Always
           # Container-level hardening: drop everything we don't need
           securityContext:
