@@ -52,9 +52,55 @@ spec:
       # apps/portfolio/registry-secret.yml.
       imagePullSecrets:
         - name: nexus-registry-credentials
+      # Init container: seed /data/contributions before nginx starts so the
+      # very first request after pod start gets real data, not a 404. Falls
+      # back to "{}" after 5 retries so a GitHub outage at startup doesn't
+      # block the pod indefinitely — the GitFeed UI renders an empty heatmap
+      # gracefully and the sidecar will retry on its normal cadence.
+      initContainers:
+        - name: contributions-init
+          image: curlimages/curl:8.10.1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          command:
+            - sh
+            - -c
+            - |
+              set -u
+              URL="https://github.com/users/andusystems-dev-0/contributions"
+              TARGET=/data/contributions
+              for i in 1 2 3 4 5; do
+                HTML=$(mktemp /data/.html.XXXXXX)
+                TMP=$(mktemp /data/.fetch.XXXXXX)
+                if curl -sf --max-time 30 -A "andusystems-portfolio-refresher/1.0" "$URL" -o "$HTML"; then
+                  grep -oE 'data-date="[0-9]{4}-[0-9]{2}-[0-9]{2}"[^>]*data-level="[0-9]"' "$HTML" \
+                    | sed -E 's/data-date="([0-9]{4}-[0-9]{2}-[0-9]{2})"[^>]*data-level="([0-9])"/"\1":\2/' \
+                    | paste -sd, - \
+                    | awk 'NF{print "{" $0 "}"}' \
+                    > "$TMP"
+                  if [ -s "$TMP" ] && [ "$(wc -c < "$TMP")" -gt 3 ]; then
+                    mv "$TMP" "$TARGET"
+                    rm -f "$HTML"
+                    echo "init: refreshed contributions"
+                    exit 0
+                  fi
+                fi
+                rm -f "$HTML" "$TMP"
+                echo "init: attempt $i failed" >&2
+                sleep $((i * 2))
+              done
+              echo '{}' > "$TARGET"
+              echo "init: all retries failed, wrote empty fallback" >&2
+          volumeMounts:
+            - name: contributions
+              mountPath: /data
       containers:
         - name: portfolio
-          image: registry.andusystems.com/andusystems-docker/portfolio:a1278e2
+          image: registry.andusystems.com/andusystems-docker/portfolio:1ee2d40
           imagePullPolicy: Always
           # Container-level hardening: drop everything we don't need
           securityContext:
@@ -96,6 +142,64 @@ spec:
             # /var/cache/nginx is also written by nginx for various caches.
             - name: nginx-cache
               mountPath: /var/cache/nginx
+            # Overlays the prerendered /api/contributions baked into the
+            # image with a live file refreshed by the sidecar every 30 min.
+            # The image's baked-in file (built by the SvelteKit prerender)
+            # exists only to support local `npm run dev/preview` — at runtime
+            # it is hidden by this mount and the init container reseeds it.
+            - name: contributions
+              mountPath: /usr/share/nginx/html/api
+        # Sidecar: refresh /data/contributions every 30 minutes. Uses the
+        # same fetch logic as the init container, but on a loop. Failures
+        # are logged and the previous file is left in place — readers never
+        # see a half-written or empty response (atomic mv).
+        - name: contributions-refresh
+          image: curlimages/curl:8.10.1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
+          command:
+            - sh
+            - -c
+            - |
+              URL="https://github.com/users/andusystems-dev-0/contributions"
+              TARGET=/data/contributions
+              while true; do
+                sleep 1800
+                HTML=$(mktemp /data/.html.XXXXXX)
+                TMP=$(mktemp /data/.fetch.XXXXXX)
+                if curl -sf --max-time 30 -A "andusystems-portfolio-refresher/1.0" "$URL" -o "$HTML"; then
+                  grep -oE 'data-date="[0-9]{4}-[0-9]{2}-[0-9]{2}"[^>]*data-level="[0-9]"' "$HTML" \
+                    | sed -E 's/data-date="([0-9]{4}-[0-9]{2}-[0-9]{2})"[^>]*data-level="([0-9])"/"\1":\2/' \
+                    | paste -sd, - \
+                    | awk 'NF{print "{" $0 "}"}' \
+                    > "$TMP"
+                  if [ -s "$TMP" ] && [ "$(wc -c < "$TMP")" -gt 3 ]; then
+                    mv "$TMP" "$TARGET"
+                    echo "$(date -Iseconds) refresh: ok"
+                  else
+                    rm -f "$TMP"
+                    echo "$(date -Iseconds) refresh: empty/malformed" >&2
+                  fi
+                else
+                  rm -f "$TMP"
+                  echo "$(date -Iseconds) refresh: fetch failed" >&2
+                fi
+                rm -f "$HTML"
+              done
+          volumeMounts:
+            - name: contributions
+              mountPath: /data
       volumes:
         - name: tmp
           emptyDir:
@@ -103,6 +207,12 @@ spec:
         - name: nginx-cache
           emptyDir:
             sizeLimit: 64Mi
+        # Shared between init/sidecar (writers) and nginx (reader). Holds
+        # the single file `contributions` plus short-lived .html/.fetch
+        # temp files used during atomic refresh.
+        - name: contributions
+          emptyDir:
+            sizeLimit: 4Mi
 ---
 apiVersion: v1
 kind: Service
@@ -198,10 +308,12 @@ spec:
         - port: 8080
           protocol: TCP
 ---
-# Allow egress only to kube-dns for name resolution. The static site doesn't
-# need to reach anything else — no outbound API calls, no telemetry. If the
-# pod is ever compromised, it can't reach cluster services, node metadata,
-# or other namespaces.
+# Allow egress to kube-dns (name resolution) and to public HTTPS endpoints
+# for the GitHub contributions refresh sidecar. The HTTPS allow is scoped to
+# 443/TCP and excludes RFC1918 + link-local/cloud-metadata ranges so the pod
+# can still not reach cluster services, node metadata, or other namespaces.
+# nginx itself makes no outbound requests; only the contributions-refresh
+# sidecar uses this egress path (to github.com).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -225,4 +337,15 @@ spec:
         - port: 53
           protocol: UDP
         - port: 53
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+      ports:
+        - port: 443
           protocol: TCP
