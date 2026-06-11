@@ -16,7 +16,7 @@ tempo:
       backend: s3
       s3:
         bucket: tempo-data
-        endpoint: 10.238.40.23:9000
+        endpoint: 10.238.40.25:9000
         insecure: true
 
   # Generate span metrics for Prometheus
