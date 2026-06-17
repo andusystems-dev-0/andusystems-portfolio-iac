@@ -1,0 +1,17 @@
+---
+# Daily cleanup of stuck/orphaned Longhorn snapshots across all volumes.
+# Without this, failed snapshot operations (e.g. aborted backups) leave
+# copy-on-write snapshot data behind that grows the on-disk footprint
+# until kubelet evicts pods under disk pressure.
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: snapshot-cleanup-daily
+  namespace: longhorn-system
+spec:
+  cron: "0 3 * * *"
+  task: snapshot-cleanup
+  groups:
+    - default
+  retain: 1
+  concurrency: 2

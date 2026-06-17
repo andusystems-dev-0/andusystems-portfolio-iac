@@ -7,6 +7,10 @@ grafana:
 prometheus:
   prometheusSpec:
     retention: 7d
+    # Hard size cap — Prometheus evicts oldest blocks once TSDB exceeds this,
+    # independent of the time-based retention. Prevents disk-pressure on the
+    # 15Gi PVC (which doubles as Longhorn replica storage on each worker).
+    retentionSize: 8GB
     storageSpec:
       volumeClaimTemplate:
         spec:
