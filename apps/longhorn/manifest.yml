@@ -9,12 +9,14 @@ metadata:
   name: snapshot-cleanup-daily
   namespace: longhorn-system
 spec:
+  # Longhorn's RecurringJob CRD requires spec.name in addition to
+  # metadata.name; the admission webhook rejects the resource without it.
+  name: snapshot-cleanup-daily
   cron: "0 3 * * *"
   task: snapshot-cleanup
   groups:
     - default
-  # snapshot-cleanup deletes stale snapshots; it does not create any,
-  # so retain must be 0 — Longhorn's admission webhook rejects retain>0
-  # for this task type.
+  # snapshot-cleanup only deletes orphaned snapshots, so retain is unused;
+  # set to 0 to satisfy the schema.
   retain: 0
   concurrency: 2
