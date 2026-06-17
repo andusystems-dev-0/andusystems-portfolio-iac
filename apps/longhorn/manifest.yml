@@ -13,5 +13,8 @@ spec:
   task: snapshot-cleanup
   groups:
     - default
-  retain: 1
+  # snapshot-cleanup deletes stale snapshots; it does not create any,
+  # so retain must be 0 — Longhorn's admission webhook rejects retain>0
+  # for this task type.
+  retain: 0
   concurrency: 2
